@@ -1,0 +1,82 @@
+{
+	"id": "ee7f60c7-a3e8-ef11-90cb-000d3ab84c4a",
+	"createdAt": "2025-02-11T18:12:40.403Z",
+	"createdBy": "charles",
+	"git": {
+		"remote": "https://github.com/charles-neptune/propel_example",
+		"branch": "master"
+	},
+	"name": "propel",
+	"description": null,
+	"ver": "25.02.14.1417",
+	"enableCICD": true,
+	"internalReadOnly": false,
+	"oeVersion": null,
+	"excludeTemplateFiles": false,
+	"roles": [],
+	"apps": [
+		{
+			"id": "8f33cbcd-a3e8-ef11-90cb-000d3ab84c4a",
+			"application": "propel_example_app",
+			"title": "",
+			"description": ""
+		}
+	],
+	"api": [
+		{
+			"id": "4b352bf8-a3e8-ef11-90cb-000d3ab84c4a",
+			"name": "propel_script",
+			"description": null,
+			"apiGroup": null
+		},
+		{
+			"id": "1fea2dc0-93e8-ef11-90cb-000d3ab84c4a",
+			"name": "propel",
+			"description": null,
+			"apiGroup": null
+		}
+	],
+	"odataSource": [],
+	"odataMock": [],
+	"dictionary": [],
+	"jsclass": [
+		{
+			"id": "c7f0a007-a4e8-ef11-90cb-000d3ab84c4a",
+			"name": "CombinedAPICall",
+			"description": null
+		}
+	],
+	"jsscript_group": [
+		{
+			"id": "9e023b01-a4e8-ef11-90cb-000d3ab84c4a",
+			"name": "propelscript",
+			"description": ""
+		}
+	],
+	"theme": [],
+	"pdf": [],
+	"rulesengine": [],
+	"reports": [],
+	"api_authentication": [],
+	"api_group": [],
+	"tile": [],
+	"tile_layout": [],
+	"category": [],
+	"tilegroup_layout": [],
+	"launchpad": [],
+	"launchpad_layout": [],
+	"certificates": [],
+	"role": [],
+	"systems": [],
+	"doc": [],
+	"wf_notifications": [],
+	"department": [],
+	"script_scheduler": [],
+	"wf_definition": [],
+	"connector": [],
+	"events": [],
+	"code_snippets": [],
+	"wf_determination": [],
+	"wf_taskaction": [],
+	"theme_ui5": []
+}
