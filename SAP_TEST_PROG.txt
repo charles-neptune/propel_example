@@ -54,4 +54,196 @@ DATA:
   gt_period       TYPE tt_bapi_0050_period,
   gt_sender_prd   TYPE tt_bapi_0050_period,
 
-  gt_longtext     TYPE tt_bapi_0050_longt
+  gt_longtext     TYPE tt_bapi_0050_longtxt,
+  gt_extin        TYPE tt_bapiparex,
+
+  gt_return       TYPE tt_bapiret2,
+
+  gv_fmarea_out   TYPE bapi_0050_fields-fm_area,
+  gv_docyear      TYPE bapi_0050_fields-doc_year,
+  gv_docnum       TYPE bapi_0050_fields-document.
+
+*-----------------------------------------------------------------------
+* Helper class
+*-----------------------------------------------------------------------
+CLASS lcl_fmbb DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS build_mock_appr
+      IMPORTING
+        i_fmarea      TYPE bapi_0050_fields-fm_area
+      EXPORTING
+        e_header      TYPE bapi_0050_header
+        e_header_add  TYPE bapi_0050_header_add
+        et_item       TYPE tt_bapi_0050_item
+        et_sender     TYPE tt_bapi_0050_item
+        et_period     TYPE tt_bapi_0050_period
+        et_sender_prd TYPE tt_bapi_0050_period
+        et_longtext   TYPE tt_bapi_0050_longtxt
+        et_extin      TYPE tt_bapiparex.
+
+    CLASS-METHODS call_bapi
+      IMPORTING
+        i_test        TYPE abap_bool
+        i_header      TYPE bapi_0050_header
+        i_header_add  TYPE bapi_0050_header_add
+        it_item       TYPE tt_bapi_0050_item
+        it_sender     TYPE tt_bapi_0050_item
+        it_period     TYPE tt_bapi_0050_period
+        it_sender_prd TYPE tt_bapi_0050_period
+        it_longtext   TYPE tt_bapi_0050_longtxt
+        it_extin      TYPE tt_bapiparex
+      EXPORTING
+        e_fmarea      TYPE bapi_0050_fields-fm_area
+        e_docyear     TYPE bapi_0050_fields-doc_year
+        e_docnum      TYPE bapi_0050_fields-document
+        et_return     TYPE tt_bapiret2.
+ENDCLASS.
+
+*-----------------------------------------------------------------------
+* Implementation
+*-----------------------------------------------------------------------
+CLASS lcl_fmbb IMPLEMENTATION.
+
+  METHOD build_mock_appr.
+    DATA ls_item TYPE bapi_0050_item.
+    DATA ls_txt  TYPE bapi_0050_longtext.
+
+    CLEAR:
+      e_header, e_header_add,
+      et_item, et_sender,
+      et_period, et_sender_prd,
+      et_longtext, et_extin.
+
+    "-------------------------
+    " HEADER
+    "-------------------------
+    e_header-fm_area    = i_fmarea.
+    e_header-version    = '0'.
+    e_header-doctype    = 'APPR'.
+    e_header-docdate    = '20251226'.
+    e_header-pstng_date = '20251226'.
+
+    "-------------------------
+    " HEADER ADDITIONAL
+    "-------------------------
+    e_header_add-header_text =
+      'APPR created via BAPI_0050_CREATE (mock)'.
+
+    "-------------------------
+    " ITEM DATA
+    "-------------------------
+    ls_item-item_num       = '000001'.
+    ls_item-fisc_year      = '2026'.
+    ls_item-budtype        = '4450'.
+    ls_item-fund           = 'FUNDWC001'.
+    ls_item-funds_ctr      = 'NAVY'.
+    ls_item-cmmt_item      = 'ALLOBJ'.
+    ls_item-func_area      = 'NVSUP'.
+    ls_item-budget_period  = '20269999'.
+    ls_item-trans_curr     = 'USD'.
+    ls_item-total_amount   = '10000000'.
+    ls_item-item_text      = 'APPR budget entry (mock)'.
+
+    APPEND ls_item TO et_item.
+    APPEND ls_item TO et_sender. "mirror sender for APPR
+
+    "-------------------------
+    " LONG TEXT (optional)
+    "-------------------------
+    ls_txt-tdline =
+      'Mock FMBB APPR document created for testing BAPI_0050_CREATE.'.
+    APPEND ls_txt TO et_longtext.
+
+  ENDMETHOD.
+
+  METHOD call_bapi.
+    DATA lv_testrun TYPE bapi_0050_fields-testrun VALUE space.
+    DATA lv_error   TYPE abap_bool VALUE abap_false.
+
+    IF i_test = abap_true.
+      lv_testrun = 'X'.
+    ENDIF.
+
+    CALL FUNCTION 'BAPI_0050_CREATE'
+      EXPORTING
+        header_data        = i_header
+        header_data_add    = i_header_add
+        testrun            = lv_testrun
+        update_mode        = '1'
+      IMPORTING
+        fmarea             = e_fmarea
+        documentyear       = e_docyear
+        documentnumber     = e_docnum
+      TABLES
+        item_data          = it_item
+        sender_item_data   = it_sender
+        period_data        = it_period
+        sender_period_data = it_sender_prd
+        long_text          = it_longtext
+        extensionin        = it_extin
+        return             = et_return.
+
+    LOOP AT et_return ASSIGNING FIELD-SYMBOL(<r>).
+      IF <r>-type CA 'AEX'.
+        lv_error = abap_true.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+    IF i_test = abap_false AND lv_error = abap_false.
+      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+        EXPORTING wait = abap_true.
+    ELSEIF lv_error = abap_true.
+      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+    ENDIF.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+*-----------------------------------------------------------------------
+* Execution
+*-----------------------------------------------------------------------
+START-OF-SELECTION.
+
+  lcl_fmbb=>build_mock_appr(
+    EXPORTING
+      i_fmarea      = p_fmarea
+    IMPORTING
+      e_header      = gs_header
+      e_header_add  = gs_header_add
+      et_item       = gt_item
+      et_sender     = gt_sender_item
+      et_period     = gt_period
+      et_sender_prd = gt_sender_prd
+      et_longtext   = gt_longtext
+      et_extin      = gt_extin
+  ).
+
+  lcl_fmbb=>call_bapi(
+    EXPORTING
+      i_test        = p_test
+      i_header      = gs_header
+      i_header_add  = gs_header_add
+      it_item       = gt_item
+      it_sender     = gt_sender_item
+      it_period     = gt_period
+      it_sender_prd = gt_sender_prd
+      it_longtext   = gt_longtext
+      it_extin      = gt_extin
+    IMPORTING
+      e_fmarea      = gv_fmarea_out
+      e_docyear     = gv_docyear
+      e_docnum      = gv_docnum
+      et_return     = gt_return
+  ).
+
+  WRITE: / 'Test run:', p_test,
+         / 'FM Area:', gv_fmarea_out,
+         / 'Document Year:', gv_docyear,
+         / 'Document Number:', gv_docnum.
+
+  ULINE.
+  LOOP AT gt_return ASSIGNING FIELD-SYMBOL(<ret>).
+    WRITE: / <ret>-type, <ret>-id, <ret>-number, <ret>-message.
+  ENDLOOP.
