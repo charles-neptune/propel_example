@@ -1,253 +1,57 @@
-REPORT z_fmbb_bapi0050_create.
+REPORT zneptune_fmbb_test.
 
 *-----------------------------------------------------------------------
-* FMBB / BCS: Create Budget Entry Document using BAPI_0050_CREATE
+* FMBB / BCS Budget Entry Document Creation
+* BAPI: BAPI_0050_CREATE
 *
-* Based on your document "APPR (Appropriation)" example:
-* - Doc Type: APPR
-* - Version: 0
-* - Doc Date / Posting Date: 12/26/2025
-* - Fiscal Year: 2026
-* - Fund: FUNDWC001
-* - Budget Period: 20269999
-* - Functional Area: NVSUP
-* - (Funded Program NAVY is shown in FMBB UI; note: not in BAPI_0050_ITEM
-*   in your screenshot - often mapped via MEASURE / USERDIM / EXTENSIONIN)
-* - Budget Type: 4450
-* - Funds Center: NAVY
-* - Commitment Item: ALLOBJ
-* - Amount: 10000000
+* Mock example based on APPR document:
+*  - Version 0
+*  - FY 2026
+*  - Fund FUNDWC001
+*  - Budget Period 20269999
+*  - Functional Area NVSUP
+*  - Budget Type 4450
+*  - Funds Center NAVY
+*  - Commitment Item ALLOBJ
+*  - Amount 10,000,000 USD
 *-----------------------------------------------------------------------
 
-SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-t01.
+*-----------------------------------------------------------------------
+* Selection Screen
+*-----------------------------------------------------------------------
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE
+  'Create FMBB Budget Entry Doc (BAPI_0050_CREATE)'.
 PARAMETERS:
   p_fmarea TYPE bapi_0050_fields-fm_area OBLIGATORY,
   p_test   TYPE abap_bool AS CHECKBOX DEFAULT abap_true.
 SELECTION-SCREEN END OF BLOCK b1.
 
-INITIALIZATION.
-  text-t01 = 'Create FMBB Budget Entry Doc (BAPI_0050_CREATE)'.
+*-----------------------------------------------------------------------
+* Explicit table types (OO-safe)
+*-----------------------------------------------------------------------
+TYPES:
+  tt_bapi_0050_item    TYPE STANDARD TABLE OF bapi_0050_item
+                       WITH DEFAULT KEY,
+  tt_bapi_0050_period  TYPE STANDARD TABLE OF bapi_0050_period
+                       WITH DEFAULT KEY,
+  tt_bapi_0050_longtxt TYPE STANDARD TABLE OF bapi_0050_longtext
+                       WITH DEFAULT KEY,
+  tt_bapiparex         TYPE STANDARD TABLE OF bapiparex
+                       WITH DEFAULT KEY,
+  tt_bapiret2          TYPE STANDARD TABLE OF bapiret2
+                       WITH DEFAULT KEY.
 
 *-----------------------------------------------------------------------
-* Types exactly as per your SE37 interface screenshot
+* Data declarations
 *-----------------------------------------------------------------------
 DATA:
   gs_header       TYPE bapi_0050_header,
   gs_header_add   TYPE bapi_0050_header_add,
 
-  gt_item         TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
-  gt_sender_item  TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
+  gt_item         TYPE tt_bapi_0050_item,
+  gt_sender_item  TYPE tt_bapi_0050_item,
 
-  gt_period       TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
-  gt_sender_prd   TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
+  gt_period       TYPE tt_bapi_0050_period,
+  gt_sender_prd   TYPE tt_bapi_0050_period,
 
-  gt_longtext     TYPE STANDARD TABLE OF bapi_0050_longtext WITH DEFAULT KEY,
-  gt_extin        TYPE STANDARD TABLE OF bapiparex WITH DEFAULT KEY,
-
-  gt_return       TYPE STANDARD TABLE OF bapiret2 WITH DEFAULT KEY,
-
-  gv_docyear      TYPE bapi_0050_fields-doc_year,
-  gv_docnum       TYPE bapi_0050_fields-document,
-  gv_fmarea_out   TYPE bapi_0050_fields-fm_area.
-
-*-----------------------------------------------------------------------
-* Local class: keeps “build data” separate from “post”
-*-----------------------------------------------------------------------
-CLASS lcl_fmbb DEFINITION.
-  PUBLIC SECTION.
-    CLASS-METHODS:
-      build_mock_appr
-        IMPORTING  i_fmarea      TYPE bapi_0050_fields-fm_area
-        EXPORTING  e_header      TYPE bapi_0050_header
-                  e_header_add  TYPE bapi_0050_header_add
-                  et_item       TYPE STANDARD TABLE OF bapi_0050_item
-                  et_sender     TYPE STANDARD TABLE OF bapi_0050_item
-                  et_period     TYPE STANDARD TABLE OF bapi_0050_period
-                  et_sender_prd TYPE STANDARD TABLE OF bapi_0050_period
-                  et_longtext   TYPE STANDARD TABLE OF bapi_0050_longtext
-                  et_extin      TYPE STANDARD TABLE OF bapiparex,
-
-      call_bapi
-        IMPORTING  i_test        TYPE abap_bool
-                  i_header      TYPE bapi_0050_header
-                  i_header_add  TYPE bapi_0050_header_add
-                  it_item       TYPE STANDARD TABLE OF bapi_0050_item
-                  it_sender     TYPE STANDARD TABLE OF bapi_0050_item
-                  it_period     TYPE STANDARD TABLE OF bapi_0050_period
-                  it_sender_prd TYPE STANDARD TABLE OF bapi_0050_period
-                  it_longtext   TYPE STANDARD TABLE OF bapi_0050_longtext
-                  it_extin      TYPE STANDARD TABLE OF bapiparex
-        EXPORTING  e_fmarea      TYPE bapi_0050_fields-fm_area
-                  e_docyear     TYPE bapi_0050_fields-doc_year
-                  e_docnum      TYPE bapi_0050_fields-document
-                  et_return     TYPE STANDARD TABLE OF bapiret2.
-ENDCLASS.
-
-CLASS lcl_fmbb IMPLEMENTATION.
-
-  METHOD build_mock_appr.
-    DATA: ls_item     TYPE bapi_0050_item,
-          ls_sender   TYPE bapi_0050_item,
-          ls_txt      TYPE bapi_0050_longtext,
-          ls_ext      TYPE bapiparex.
-
-    CLEAR: e_header, e_header_add,
-           et_item, et_sender, et_period, et_sender_prd, et_longtext, et_extin.
-
-    "-------------------------
-    " HEADER_DATA
-    "-------------------------
-    e_header-fm_area    = i_fmarea.
-    e_header-version    = '0'.
-    e_header-doctype    = 'APPR'.
-    e_header-docdate    = '20251226'.   "12/26/2025
-    e_header-pstng_date = '20251226'.   "12/26/2025
-    "Process in FMBB UI shows "Enter". In BCS it is typically derived;
-    "only set PROCESS if your structure has it and your config requires it.
-    "e_header-process  = 'ENTR'.        "ONLY if field exists in your DDIC
-
-    "-------------------------
-    " HEADER_DATA_ADD
-    "-------------------------
-    e_header_add-header_text = 'APPR created via BAPI_0050_CREATE (mock)'.
-
-    "-------------------------
-    " ITEM_DATA (key point: Fund/Budget Period belong here)
-    "-------------------------
-    CLEAR ls_item.
-    ls_item-item_num      = '000001'.
-    ls_item-fisc_year     = '2026'.
-    ls_item-budtype       = '4450'.
-    ls_item-fund          = 'FUNDWC001'.
-    ls_item-funds_ctr     = 'NAVY'.
-    ls_item-cmmt_item     = 'ALLOBJ'.
-    ls_item-func_area     = 'NVSUP'.
-    ls_item-budget_period = '20269999'.
-    ls_item-trans_curr    = 'USD'.
-    ls_item-total_amount  = '10000000'.
-    ls_item-item_text     = 'APPR payment budget entry (mock)'.
-    "Optional dims if your setup uses them:
-    "ls_item-measure      = 'NAVY'.      "Sometimes used as Funded Program / custom dim
-    "ls_item-userdim      = 'NAVY'.      "If your config mapped Funded Program into USERDIM
-
-    APPEND ls_item TO et_item.
-
-    "-------------------------
-    " SENDER_ITEM_DATA (optional)
-    " For some processes you’ll use sender/receiver. Here we mirror.
-    "-------------------------
-    CLEAR ls_sender.
-    ls_sender = ls_item.
-    APPEND ls_sender TO et_sender.
-
-    "-------------------------
-    " LONG_TEXT (optional)
-    "-------------------------
-    CLEAR ls_txt.
-    ls_txt-tdline = 'Mock long text: created for APPR based on FMBB document.'.
-    APPEND ls_txt TO et_longtext.
-
-    "-------------------------
-    " EXTENSIONIN (optional)
-    " Use ONLY if you have enhancements expecting extra fields (e.g. Funded Program).
-    " Example shows placeholder; remove if not used.
-    "-------------------------
-    "CLEAR ls_ext.
-    "ls_ext-structure  = 'ZBAPI0050_EXT'.  "your append structure name
-    "ls_ext-valuepart1 = '...'.
-    "APPEND ls_ext TO et_extin.
-
-  ENDMETHOD.
-
-  METHOD call_bapi.
-    DATA lv_testrun TYPE bapi_0050_fields-testrun.
-    DATA lv_has_err TYPE abap_bool VALUE abap_false.
-
-    CLEAR: e_fmarea, e_docyear, e_docnum, et_return.
-
-    lv_testrun = COND #( WHEN i_test = abap_true THEN 'X' ELSE space ).
-
-    CALL FUNCTION 'BAPI_0050_CREATE'
-      EXPORTING
-        header_data       = i_header
-        header_data_add   = i_header_add
-        testrun           = lv_testrun
-        update_mode       = '1'
-      IMPORTING
-        fmarea            = e_fmarea
-        documentyear      = e_docyear
-        documentnumber    = e_docnum
-      TABLES
-        item_data         = it_item
-        sender_item_data  = it_sender
-        period_data       = it_period
-        sender_period_data= it_sender_prd
-        long_text         = it_longtext
-        extensionin       = it_extin
-        return            = et_return.
-
-    LOOP AT et_return ASSIGNING FIELD-SYMBOL(<r>).
-      IF <r>-type = 'E' OR <r>-type = 'A' OR <r>-type = 'X'.
-        lv_has_err = abap_true.
-        EXIT.
-      ENDIF.
-    ENDLOOP.
-
-    IF i_test = abap_false AND lv_has_err = abap_false.
-      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
-        EXPORTING
-          wait = abap_true.
-    ELSEIF i_test = abap_false AND lv_has_err = abap_true.
-      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-    ENDIF.
-
-  ENDMETHOD.
-
-ENDCLASS.
-
-START-OF-SELECTION.
-
-  "1) Build mock dataset (replace this with your inbound data mapping later)
-  lcl_fmbb=>build_mock_appr(
-    EXPORTING
-      i_fmarea      = p_fmarea
-    IMPORTING
-      e_header      = gs_header
-      e_header_add  = gs_header_add
-      et_item       = gt_item
-      et_sender     = gt_sender_item
-      et_period     = gt_period
-      et_sender_prd = gt_sender_prd
-      et_longtext   = gt_longtext
-      et_extin      = gt_extin
-  ).
-
-  "2) Call BAPI
-  lcl_fmbb=>call_bapi(
-    EXPORTING
-      i_test        = p_test
-      i_header      = gs_header
-      i_header_add  = gs_header_add
-      it_item       = gt_item
-      it_sender     = gt_sender_item
-      it_period     = gt_period
-      it_sender_prd = gt_sender_prd
-      it_longtext   = gt_longtext
-      it_extin      = gt_extin
-    IMPORTING
-      e_fmarea      = gv_fmarea_out
-      e_docyear     = gv_docyear
-      e_docnum      = gv_docnum
-      et_return     = gt_return
-  ).
-
-  "3) Output
-  WRITE: / 'TESTRUN:', p_test.
-  WRITE: / 'FMAREA:', gv_fmarea_out.
-  WRITE: / 'DOCYEAR:', gv_docyear.
-  WRITE: / 'DOCNUMBER:', gv_docnum.
-  ULINE.
-  WRITE: / 'RETURN:'.
-  LOOP AT gt_return ASSIGNING FIELD-SYMBOL(<ret>).
-    WRITE: / <ret>-type, <ret>-id, <ret>-number, <ret>-message.
-  ENDLOOP.
+  gt_longtext     TYPE tt_bapi_0050_longt
