@@ -1,21 +1,326 @@
-DATA: lv_periv TYPE t001-periv,
-      lv_monat TYPE monat,
-      lv_gjahr TYPE gjahr.
+*&---------------------------------------------------------------------*
+*& Report ZNEPTUNE_FMBB_TEST
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zneptune_fmbb_test.
 
-" 1) Get fiscal year variant for your company code
-SELECT SINGLE periv
-  INTO lv_periv
-  FROM t001
- WHERE bukrs = '<your_bukrs>'.
 
-" 2) Derive fiscal period from posting date
-CALL FUNCTION 'DATE_TO_PERIOD_CONVERT'
-  EXPORTING
-    i_date  = gs_header-pstng_date
-    i_periv = lv_periv
-  IMPORTING
-    e_buper = lv_monat
-    e_gjahr = lv_gjahr.
+*-----------------------------------------------------------------------
+* FMBB / BCS: Create Budget Entry Document using BAPI_0050_CREATE
+*
+* Interface per your SE37 screenshot:
+*   IMPORTING:  LANGUAGE (optional)
+*               HEADER_DATA      TYPE BAPI_0050_HEADER
+*               HEADER_DATA_ADD  TYPE BAPI_0050_HEADER_ADD
+*               TESTRUN          TYPE BAPI_0050_FIELDS-TESTRUN (default 'X')
+*               UPDATE_MODE      TYPE BAPI_0051_FIELDS-UPDATE_MODE (default '1')
+*
+*   EXPORTING:  FMAREA           TYPE BAPI_0050_FIELDS-FM_AREA
+*               DOCUMENTYEAR     TYPE BAPI_0050_FIELDS-DOC_YEAR
+*               DOCUMENTNUMBER   TYPE BAPI_0050_FIELDS-DOCUMENT
+*
+*   TABLES:     ITEM_DATA        STRUCTURE BAPI_0050_ITEM
+*               SENDER_ITEM_DATA STRUCTURE BAPI_0050_ITEM
+*               PERIOD_DATA      STRUCTURE BAPI_0050_PERIOD
+*               SENDER_PERIOD_DATA STRUCTURE BAPI_0050_PERIOD
+*               LONG_TEXT        STRUCTURE BAPI_0050_LONGTEXT
+*               EXTENSIONIN      STRUCTURE BAPIPAREX
+*               RETURN           STRUCTURE BAPIRET2
+*
+* Mock data based on your APPR example in the attached document:
+*   - DocType: APPR, Version 0
+*   - DocDate / PostingDate: 12/26/2025
+*   - Fiscal Year: 2026
+*   - Fund: FUNDWC001
+*   - Budget Period: 20269999
+*   - Functional Area: NVSUP
+*   - Budget Type: 4450
+*   - Funds Center: NAVY
+*   - Commitment Item: ALLOBJ
+*   - Amount: 10000000
+*-----------------------------------------------------------------------
 
-" 3) Use that as the budgeting period (NUMC3)
-ls_period-budgeting_period = |{ lv_monat ALPHA = IN WIDTH = 3 }|.
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS:
+    p_fmarea TYPE bapi_0050_fields-fm_area OBLIGATORY DEFAULT 'N100',
+    p_test   TYPE abap_bool AS CHECKBOX DEFAULT abap_true.
+SELECTION-SCREEN END OF BLOCK b1.
+
+
+INITIALIZATION.
+  "ext-001 = 'Create FMBB Budget Entry Doc (BAPI_0050_CREATE)'.
+
+*-----------------------------------------------------------------------
+* OO-safe named table types (fixes "TYPE TABLE OF BAPI_0050_ITEM" issues)
+*-----------------------------------------------------------------------
+  TYPES:
+    tt_bapi_0050_item     TYPE STANDARD TABLE OF bapi_0050_item      WITH DEFAULT KEY,
+    tt_bapi_0050_period   TYPE STANDARD TABLE OF bapi_0050_period    WITH DEFAULT KEY,
+    tt_bapi_0050_longtext TYPE STANDARD TABLE OF bapi_0050_longtext  WITH DEFAULT KEY,
+    tt_bapiparex          TYPE STANDARD TABLE OF bapiparex           WITH DEFAULT KEY,
+    tt_bapiret2           TYPE STANDARD TABLE OF bapiret2            WITH DEFAULT KEY.
+
+  DATA:
+    gs_header      TYPE bapi_0050_header,
+    gs_header_add  TYPE bapi_0050_header_add,
+
+    gt_item        TYPE tt_bapi_0050_item,
+    gt_sender_item TYPE tt_bapi_0050_item,
+
+    gt_period      TYPE tt_bapi_0050_period,
+    gt_sender_prd  TYPE tt_bapi_0050_period,
+
+    gt_longtext    TYPE tt_bapi_0050_longtext,
+    gt_extin       TYPE tt_bapiparex,
+
+    gt_return      TYPE tt_bapiret2,
+
+    gv_docyear     TYPE bapi_0050_fields-doc_year,
+    gv_docnum      TYPE bapi_0050_fields-document,
+    gv_fmarea_out  TYPE bapi_0050_fields-fm_area.
+
+*-----------------------------------------------------------------------
+* Local class
+*-----------------------------------------------------------------------
+CLASS lcl_fmbb DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS build_mock_appr
+      IMPORTING
+        i_fmarea      TYPE bapi_0050_fields-fm_area
+      EXPORTING
+        e_header      TYPE bapi_0050_header
+        e_header_add  TYPE bapi_0050_header_add
+        et_item       TYPE tt_bapi_0050_item
+        et_sender     TYPE tt_bapi_0050_item
+        et_period     TYPE tt_bapi_0050_period
+        et_sender_prd TYPE tt_bapi_0050_period
+        et_longtext   TYPE tt_bapi_0050_longtext
+        et_extin      TYPE tt_bapiparex.
+
+    CLASS-METHODS call_bapi
+      IMPORTING
+        i_test        TYPE abap_bool
+        i_header      TYPE bapi_0050_header
+        i_header_add  TYPE bapi_0050_header_add
+        it_item       TYPE tt_bapi_0050_item
+        it_sender     TYPE tt_bapi_0050_item
+        it_period     TYPE tt_bapi_0050_period
+        it_sender_prd TYPE tt_bapi_0050_period
+        it_longtext   TYPE tt_bapi_0050_longtext
+        it_extin      TYPE tt_bapiparex
+      EXPORTING
+        e_fmarea      TYPE bapi_0050_fields-fm_area
+        e_docyear     TYPE bapi_0050_fields-doc_year
+        e_docnum      TYPE bapi_0050_fields-document
+        et_return     TYPE tt_bapiret2.
+ENDCLASS.
+
+CLASS lcl_fmbb IMPLEMENTATION.
+
+  METHOD build_mock_appr.
+    DATA: ls_item   TYPE bapi_0050_item,
+          ls_sender TYPE bapi_0050_item,
+          ls_ltxt   TYPE bapi_0050_longtext.
+
+    CLEAR: e_header, e_header_add,
+           et_item, et_sender, et_period, et_sender_prd, et_longtext, et_extin.
+
+    "-------------------------
+    " HEADER_DATA
+    "-------------------------
+    e_header-fm_area    = i_fmarea.
+    e_header-version    = '000'.
+    e_header-doctype    = 'APPR'.
+    e_header-docdate    = '20251226'.   "12/26/2025
+    e_header-pstng_date = '20251226'.   "12/26/2025
+
+    e_header-process = 'ENTR'.
+
+    e_header-docstate = '2'.
+
+    "-------------------------
+    " HEADER_DATA_ADD
+    "-------------------------
+    e_header_add-header_text = 'APPR created via BAPI_0050_CREATE (mock)'.
+
+    "-------------------------
+    " ITEM_DATA (Fund/Budget Period belong here)
+    "-------------------------
+    CLEAR ls_item.
+    ls_item-item_num      = '000001'.
+    ls_item-fisc_year     = '2026'.
+    ls_item-budtype       = '4450'.
+    ls_item-fund          = 'FUNDWC001'.
+    ls_item-funds_ctr     = 'NAVY'.
+    ls_item-cmmt_item     = 'ALLOBJ'.
+    ls_item-func_area     = 'NVSUP'.
+    ls_item-budget_period = '20269999'.
+    ls_item-trans_curr    = 'USD'.
+    "  ls_item-total_amount  = '10000000'.
+    ls_item-item_text     = 'APPR payment budget entry (mock)'.
+
+    ls_item-budcat = '9F'.
+    ls_item-measure = 'NAVY'.
+    ls_item-valtype = 'B1'.
+
+    "  ls_item-distkey = '6'.
+
+    APPEND ls_item TO et_item.
+
+    DATA ls_period TYPE bapi_0050_period.
+    CLEAR ls_period.
+    ls_period-item_num = ls_item-item_num.
+    " Get budget period from posting date
+    DATA: lv_periv TYPE t001-periv,
+          lv_poper TYPE POPER,
+          lv_gjahr TYPE gjahr.
+
+    " 1) Get fiscal year variant for your company code
+    SELECT SINGLE periv
+      INTO lv_periv
+      FROM t001
+     WHERE bukrs = 'N100'.
+
+    " 2) Derive fiscal period from posting date
+    CALL FUNCTION 'DATE_TO_PERIOD_CONVERT'
+      EXPORTING
+        i_date  = gs_header-pstng_date
+        i_periv = lv_periv
+      IMPORTING
+        e_buper = lv_poper
+        e_gjahr = lv_gjahr.
+
+    " 3) Use that as the budgeting period (NUMC3)
+    ls_period-budgeting_period = |{ lv_poper ALPHA = IN WIDTH = 3 }|.
+
+    ls_period-period_amount = '1000000'.
+    APPEND ls_period TO gt_period.
+
+    CLEAR ls_item-total_amount.
+
+    "-------------------------
+    " SENDER_ITEM_DATA (optional; mirrored for now)
+    "-------------------------
+    CLEAR ls_sender.
+    ls_sender = ls_item.
+    "APPEND ls_sender TO et_sender.
+
+    "-------------------------
+    " LONG_TEXT (optional)
+    "-------------------------
+    CLEAR ls_ltxt.
+    "ls_ltxt-tdline = 'Mock long text: created for APPR based on FMBB document.'.
+    APPEND ls_ltxt TO et_longtext.
+
+    " PERIOD_DATA / EXTENSIONIN left empty in mock
+
+  ENDMETHOD.
+
+  METHOD call_bapi.
+    DATA lv_testrun TYPE bapi_0050_fields-testrun.
+    DATA lv_has_err TYPE abap_bool VALUE abap_false.
+
+    CLEAR: e_fmarea, e_docyear, e_docnum, et_return.
+
+    lv_testrun = COND #( WHEN i_test = abap_true THEN 'X' ELSE space ).
+    DATA: lt_item       TYPE tt_bapi_0050_item,
+          lt_sender     TYPE tt_bapi_0050_item,
+          lt_period     TYPE tt_bapi_0050_period,
+          lt_sender_prd TYPE tt_bapi_0050_period,
+          lt_longtext   TYPE tt_bapi_0050_longtext,
+          lt_extin      TYPE tt_bapiparex.
+
+    lt_item       = it_item.
+    lt_sender     = it_sender.
+    lt_period     = it_period.
+    lt_sender_prd = it_sender_prd.
+    lt_longtext   = it_longtext.
+    lt_extin      = it_extin.
+
+    CALL FUNCTION 'BAPI_0050_CREATE'
+      EXPORTING
+        header_data        = i_header
+        header_data_add    = i_header_add
+        testrun            = lv_testrun
+        update_mode        = '1'
+      IMPORTING
+        fmarea             = e_fmarea
+        documentyear       = e_docyear
+        documentnumber     = e_docnum
+      TABLES
+        item_data          = lt_item
+        sender_item_data   = lt_sender
+        period_data        = lt_period
+        sender_period_data = lt_sender_prd
+        long_text          = lt_longtext
+        extension_in       = lt_extin
+        return             = et_return.
+
+    "Detect hard errors
+    LOOP AT et_return ASSIGNING FIELD-SYMBOL(<r>).
+      IF <r>-type = 'E' OR <r>-type = 'A' OR <r>-type = 'X'.
+        lv_has_err = abap_true.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+    IF i_test = abap_false AND lv_has_err = abap_false.
+      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+        EXPORTING
+          wait = abap_true.
+    ELSEIF i_test = abap_false AND lv_has_err = abap_true.
+      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+    ENDIF.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+START-OF-SELECTION.
+
+  "1) Build mock dataset (later replace with inbound mapping)
+  lcl_fmbb=>build_mock_appr(
+    EXPORTING
+      i_fmarea      = p_fmarea
+    IMPORTING
+      e_header      = gs_header
+      e_header_add  = gs_header_add
+      et_item       = gt_item
+      et_sender     = gt_sender_item
+      et_period     = gt_period
+      et_sender_prd = gt_sender_prd
+      et_longtext   = gt_longtext
+      et_extin      = gt_extin
+  ).
+
+  "2) Call the BAPI
+  lcl_fmbb=>call_bapi(
+    EXPORTING
+      i_test        = p_test
+      i_header      = gs_header
+      i_header_add  = gs_header_add
+      it_item       = gt_item
+      it_sender     = gt_sender_item
+      it_period     = gt_period
+      it_sender_prd = gt_sender_prd
+      it_longtext   = gt_longtext
+      it_extin      = gt_extin
+    IMPORTING
+      e_fmarea      = gv_fmarea_out
+      e_docyear     = gv_docyear
+      e_docnum      = gv_docnum
+      et_return     = gt_return
+  ).
+
+  "3) Output
+  WRITE: / 'TESTRUN:', p_test.
+  WRITE: / 'FMAREA:', gv_fmarea_out.
+  WRITE: / 'DOCYEAR:', gv_docyear.
+  WRITE: / 'DOCNUMBER:', gv_docnum.
+  ULINE.
+  WRITE: / 'RETURN:'.
+
+  LOOP AT gt_return ASSIGNING FIELD-SYMBOL(<ret>).
+    WRITE: / <ret>-type, <ret>-id, <ret>-number, <ret>-message.
+  ENDLOOP.
