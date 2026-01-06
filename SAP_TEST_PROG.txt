@@ -1,258 +1,97 @@
-CLASS zcl_neptune_fmbb DEFINITION
-  PUBLIC
-  FINAL
-  CREATE PUBLIC.
-
-  PUBLIC SECTION.
-
-    TYPES: tt_item     TYPE ztt_bapi_0050_item,
-           tt_period   TYPE ztt_bapi_0050_period,
-           tt_longtext TYPE ztt_bapi_0050_longtext,
-           tt_extin    TYPE ztt_bapiparex,
-           tt_return   TYPE ztt_bapiret2.
-
-    "Determine budgeting period from posting date (FI period variant)
-    CLASS-METHODS determine_budgeting_period
-      IMPORTING
-        i_bukrs          TYPE bukrs
-        i_posting_date   TYPE sy-datum
-      RETURNING
-        VALUE(r_buper3)  TYPE bapi_0050_period-budgeting_period
-      RAISING
-        cx_sy_no_handler.
-
-    "Direct call to the BAPI
-    CLASS-METHODS call_bapi
-      IMPORTING
-        i_test        TYPE abap_bool
-        i_header      TYPE bapi_0050_header
-        i_header_add  TYPE bapi_0050_header_add
-        it_item       TYPE tt_item
-        it_sender     TYPE tt_item
-        it_period     TYPE tt_period
-        it_sender_prd TYPE tt_period
-        it_longtext   TYPE tt_longtext
-        it_extin      TYPE tt_extin
-      EXPORTING
-        e_fmarea      TYPE bapi_0050_fields-fm_area
-        e_docyear     TYPE bapi_0050_fields-doc_year
-        e_docnum      TYPE bapi_0050_fields-document
-        et_return     TYPE tt_return.
-
-    "Submit for later approval: store payload to Z tables
-    CLASS-METHODS submit
-      IMPORTING
-        i_header      TYPE bapi_0050_header
-        i_header_add  TYPE bapi_0050_header_add
-        it_item       TYPE tt_item
-        it_sender     TYPE tt_item
-        it_period     TYPE tt_period
-        it_sender_prd TYPE tt_period
-        it_longtext   TYPE tt_longtext
-        it_extin      TYPE tt_extin
-      EXPORTING
-        e_refid       TYPE char30.
-
-    "Approve: read payload by REFID and call the BAPI
-    CLASS-METHODS approve
-      IMPORTING
-        i_refid       TYPE char30
-        i_test        TYPE abap_bool
-      EXPORTING
-        e_fmarea      TYPE bapi_0050_fields-fm_area
-        e_docyear     TYPE bapi_0050_fields-doc_year
-        e_docnum      TYPE bapi_0050_fields-document
-        et_return     TYPE tt_return.
-
-  PRIVATE SECTION.
-    CLASS-METHODS has_hard_error
-      IMPORTING it_return TYPE tt_return
-      RETURNING VALUE(r_has) TYPE abap_bool.
-
-ENDCLASS.
+CLASS-METHODS get_for_approval
+  IMPORTING
+    i_status        TYPE char10 DEFAULT 'SUBMITTED'
+    i_with_items    TYPE abap_bool DEFAULT abap_true
+    i_with_sender   TYPE abap_bool DEFAULT abap_false
+    i_with_periods  TYPE abap_bool DEFAULT abap_false
+    i_with_text     TYPE abap_bool DEFAULT abap_false
+    i_with_extin    TYPE abap_bool DEFAULT abap_false
+  EXPORTING
+    et_hdr          TYPE ztt_zfmbb_hdr
+    et_item         TYPE ztt_zfmbb_item
+    et_sitem        TYPE ztt_zfmbb_sitem
+    et_prd          TYPE ztt_zfmbb_prd
+    et_sprd         TYPE ztt_zfmbb_sprd
+    et_ltxt         TYPE ztt_zfmbb_ltxt
+    et_extin        TYPE ztt_zfmbb_extin.
 
 
+METHOD get_for_approval.
 
-CLASS zcl_neptune_fmbb IMPLEMENTATION.
+  CLEAR: et_hdr, et_item, et_sitem, et_prd, et_sprd, et_ltxt, et_extin.
 
-  METHOD determine_budgeting_period.
-    DATA: lv_periv TYPE t001-periv,
-          lv_poper TYPE poper,
-          lv_gjahr TYPE gjahr.
+  "1) Headers awaiting approval
+  SELECT *
+    FROM zfmbb_hdr
+    INTO TABLE @et_hdr
+   WHERE status = @i_status
+   ORDER BY erdat DESC, erzet DESC.
 
-    SELECT SINGLE periv
-      INTO lv_periv
-      FROM t001
-     WHERE bukrs = i_bukrs.
+  IF et_hdr IS INITIAL.
+    RETURN.
+  ENDIF.
 
-    CALL FUNCTION 'DATE_TO_PERIOD_CONVERT'
-      EXPORTING
-        i_date  = i_posting_date
-        i_periv = lv_periv
-      IMPORTING
-        e_buper = lv_poper
-        e_gjahr = lv_gjahr.
+  "2) Optional child fetches (only when requested)
+  IF i_with_items = abap_true.
+    SELECT *
+      FROM zfmbb_item
+      INTO TABLE @et_item
+      FOR ALL ENTRIES IN @et_hdr
+     WHERE refid = @et_hdr-refid
+     ORDER BY refid, seqno.
+  ENDIF.
 
-    r_buper3 = |{ lv_poper ALPHA = IN WIDTH = 3 }|.
-  ENDMETHOD.
+  IF i_with_sender = abap_true.
+    SELECT *
+      FROM zfmbb_sitem
+      INTO TABLE @et_sitem
+      FOR ALL ENTRIES IN @et_hdr
+     WHERE refid = @et_hdr-refid
+     ORDER BY refid, seqno.
+  ENDIF.
 
+  IF i_with_periods = abap_true.
+    SELECT *
+      FROM zfmbb_prd
+      INTO TABLE @et_prd
+      FOR ALL ENTRIES IN @et_hdr
+     WHERE refid = @et_hdr-refid
+     ORDER BY refid, seqno.
 
-  METHOD has_hard_error.
-    r_has = abap_false.
-    LOOP AT it_return ASSIGNING FIELD-SYMBOL(<r>).
-      IF <r>-type = 'E' OR <r>-type = 'A' OR <r>-type = 'X'.
-        r_has = abap_true.
-        RETURN.
-      ENDIF.
-    ENDLOOP.
-  ENDMETHOD.
+    SELECT *
+      FROM zfmbb_sprd
+      INTO TABLE @et_sprd
+      FOR ALL ENTRIES IN @et_hdr
+     WHERE refid = @et_hdr-refid
+     ORDER BY refid, seqno.
+  ENDIF.
 
+  IF i_with_text = abap_true.
+    SELECT *
+      FROM zfmbb_ltxt
+      INTO TABLE @et_ltxt
+      FOR ALL ENTRIES IN @et_hdr
+     WHERE refid = @et_hdr-refid
+     ORDER BY refid, seqno.
+  ENDIF.
 
-  METHOD call_bapi.
-    DATA: lv_testrun TYPE bapi_0050_fields-testrun,
-          lt_item       TYPE tt_item,
-          lt_sender     TYPE tt_item,
-          lt_period     TYPE tt_period,
-          lt_sender_prd TYPE tt_period,
-          lt_longtext   TYPE tt_longtext,
-          lt_extin      TYPE tt_extin.
+  IF i_with_extin = abap_true.
+    SELECT *
+      FROM zfmbb_extin
+      INTO TABLE @et_extin
+      FOR ALL ENTRIES IN @et_hdr
+     WHERE refid = @et_hdr-refid
+     ORDER BY refid, seqno.
+  ENDIF.
 
-    CLEAR: e_fmarea, e_docyear, e_docnum, et_return.
-
-    lv_testrun = COND #( WHEN i_test = abap_true THEN 'X' ELSE space ).
-
-    "Work on local copies (BAPIs sometimes change passed TABLES params)
-    lt_item       = it_item.
-    lt_sender     = it_sender.
-    lt_period     = it_period.
-    lt_sender_prd = it_sender_prd.
-    lt_longtext   = it_longtext.
-    lt_extin      = it_extin.
-
-    CALL FUNCTION 'BAPI_0050_CREATE'
-      EXPORTING
-        header_data        = i_header
-        header_data_add    = i_header_add
-        testrun            = lv_testrun
-        update_mode        = '1'
-      IMPORTING
-        fmarea             = e_fmarea
-        documentyear       = e_docyear
-        documentnumber     = e_docnum
-      TABLES
-        item_data          = lt_item
-        sender_item_data   = lt_sender
-        period_data        = lt_period
-        sender_period_data = lt_sender_prd
-        long_text          = lt_longtext
-        extension_in       = lt_extin
-        return             = et_return.
-
-    IF i_test = abap_false.
-      IF has_hard_error( et_return ) = abap_false.
-        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = abap_true.
-      ELSE.
-        CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-      ENDIF.
-    ENDIF.
-  ENDMETHOD.
+ENDMETHOD.
 
 
-  METHOD submit.
-    DATA: lv_refid TYPE char30,
-          lv_seq   TYPE numc6.
 
-    lv_refid = |FMBB_{ sy-datum }_{ sy-uzeit }|.
-    e_refid  = lv_refid.
-
-    "Header
-    DATA ls_hdr TYPE zfmbb_hdr.
-    CLEAR ls_hdr.
-    ls_hdr-refid = lv_refid.
-    ls_hdr-erdat = sy-datum.
-    ls_hdr-erzet = sy-uzeit.
-    ls_hdr-ernam = sy-uname.
-    ls_hdr = CORRESPONDING #( BASE ( ls_hdr ) i_header ).
-    ls_hdr = CORRESPONDING #( BASE ( ls_hdr ) i_header_add ).
-    INSERT zfmbb_hdr FROM ls_hdr.
-
-    "Helper macro for line tables
-    DEFINE ins_lines.
-      lv_seq = '000001'.
-      LOOP AT &1 ASSIGNING FIELD-SYMBOL(<ls>).
-        DATA(&2) = VALUE &3( refid = lv_refid seqno = lv_seq ).
-        &2 = CORRESPONDING #( BASE ( &2 ) <ls> ).
-        INSERT &4 FROM &2.
-        lv_seq = lv_seq + 1.
-      ENDLOOP.
-    END-OF-DEFINITION.
-
-    ins_lines it_item       ls_i  zfmbb_item  zfmbb_item.
-    ins_lines it_sender     ls_si zfmbb_sitem zfmbb_sitem.
-    ins_lines it_period     ls_p  zfmbb_prd   zfmbb_prd.
-    ins_lines it_sender_prd ls_sp zfmbb_sprd  zfmbb_sprd.
-    ins_lines it_longtext   ls_l  zfmbb_ltxt  zfmbb_ltxt.
-    ins_lines it_extin      ls_e  zfmbb_extin zfmbb_extin.
-
-    COMMIT WORK.
-  ENDMETHOD.
-
-
-  METHOD approve.
-    DATA: ls_hdr TYPE zfmbb_hdr,
-          lt_item       TYPE tt_item,
-          lt_sender     TYPE tt_item,
-          lt_period     TYPE tt_period,
-          lt_sender_prd TYPE tt_period,
-          lt_longtext   TYPE tt_longtext,
-          lt_extin      TYPE tt_extin,
-          ls_header     TYPE bapi_0050_header,
-          ls_header_add TYPE bapi_0050_header_add.
-
-    CLEAR: e_fmarea, e_docyear, e_docnum, et_return.
-
-    SELECT SINGLE * FROM zfmbb_hdr INTO ls_hdr WHERE refid = i_refid.
-    IF sy-subrc <> 0.
-      et_return = VALUE #( ( type = 'E' id = 'ZFMBB' number = '001' message = |REFID { i_refid } not found| ) ).
-      RETURN.
-    ENDIF.
-
-    "Rehydrate header structures from includes
-    ls_header     = CORRESPONDING #( ls_hdr ).
-    ls_header_add = CORRESPONDING #( ls_hdr ).
-
-    "Read line tables and map back to BAPI tables
-    SELECT * FROM zfmbb_item  INTO TABLE @DATA(lt_zitem)  WHERE refid = @i_refid ORDER BY seqno.
-    SELECT * FROM zfmbb_sitem INTO TABLE @DATA(lt_zsitem) WHERE refid = @i_refid ORDER BY seqno.
-    SELECT * FROM zfmbb_prd   INTO TABLE @DATA(lt_zprd)   WHERE refid = @i_refid ORDER BY seqno.
-    SELECT * FROM zfmbb_sprd  INTO TABLE @DATA(lt_zsprd)  WHERE refid = @i_refid ORDER BY seqno.
-    SELECT * FROM zfmbb_ltxt  INTO TABLE @DATA(lt_zltxt)  WHERE refid = @i_refid ORDER BY seqno.
-    SELECT * FROM zfmbb_extin INTO TABLE @DATA(lt_zext)   WHERE refid = @i_refid ORDER BY seqno.
-
-    lt_item       = CORRESPONDING #( lt_zitem ).
-    lt_sender     = CORRESPONDING #( lt_zsitem ).
-    lt_period     = CORRESPONDING #( lt_zprd ).
-    lt_sender_prd = CORRESPONDING #( lt_zsprd ).
-    lt_longtext   = CORRESPONDING #( lt_zltxt ).
-    lt_extin      = CORRESPONDING #( lt_zext ).
-
-    call_bapi(
-      EXPORTING
-        i_test        = i_test
-        i_header      = ls_header
-        i_header_add  = ls_header_add
-        it_item       = lt_item
-        it_sender     = lt_sender
-        it_period     = lt_period
-        it_sender_prd = lt_sender_prd
-        it_longtext   = lt_longtext
-        it_extin      = lt_extin
-      IMPORTING
-        e_fmarea      = e_fmarea
-        e_docyear     = e_docyear
-        e_docnum      = e_docnum
-        et_return     = et_return
-    ).
-  ENDMETHOD.
-
-ENDCLASS.
+zcl_neptune_fmbb=>get_for_approval(
+  EXPORTING
+    i_status     = 'SUBMITTED'
+    i_with_items = abap_false
+  IMPORTING
+    et_hdr       = lt_hdr
+).
