@@ -1,35 +1,35 @@
-FORM display_msgs
-  USING    i_title TYPE string
-  CHANGING ct_ret  TYPE STANDARD TABLE.
 
-  DATA: lo_alv TYPE REF TO cl_salv_table.
+PARAMETERS p_test TYPE abap_bool DEFAULT abap_true.
 
-  IF ct_ret IS INITIAL.
-    MESSAGE 'No messages returned.' TYPE 'S'.
-    RETURN.
+DATA lv_cnt TYPE i.
+
+FORM delete_table USING iv_tabname TYPE string.
+  IF p_test = abap_true.
+    SELECT COUNT(*) INTO lv_cnt FROM (iv_tabname).
+    WRITE: / iv_tabname, ': would delete', lv_cnt, 'records'.
+  ELSE.
+    DELETE FROM (iv_tabname).
+    lv_cnt = sy-dbcnt.
+    WRITE: / iv_tabname, ': deleted', lv_cnt, 'records'.
   ENDIF.
-
-  TRY.
-      cl_salv_table=>factory(
-        IMPORTING
-          r_salv_table = lo_alv
-        CHANGING
-          t_table      = ct_ret ).
-
-      lo_alv->get_functions( )->set_all( abap_true ).
-      lo_alv->get_display_settings( )->set_list_header( i_title ).
-
-      "Popup size/position (rows/cols)
-      lo_alv->set_screen_popup(
-        start_column = 5
-        end_column   = 120
-        start_line   = 2
-        end_line     = 25 ).
-
-      lo_alv->display( ).
-
-    CATCH cx_root INTO DATA(lx).
-      MESSAGE lx->get_text( ) TYPE 'E'.
-  ENDTRY.
-
 ENDFORM.
+
+START-OF-SELECTION.
+
+WRITE: / 'FMBB Staging Table Cleanup'.
+ULINE.
+
+PERFORM delete_table USING 'ZFMBB_EXTIN'.
+PERFORM delete_table USING 'ZFMBB_LTXT'.
+PERFORM delete_table USING 'ZFMBB_SPRD'.
+PERFORM delete_table USING 'ZFMBB_PRD'.
+PERFORM delete_table USING 'ZFMBB_SITEM'.
+PERFORM delete_table USING 'ZFMBB_ITEM'.
+PERFORM delete_table USING 'ZFMBB_HDR'.
+
+IF p_test = abap_false.
+  COMMIT WORK.
+  MESSAGE 'FMBB staging tables cleaned successfully.' TYPE 'S'.
+ELSE.
+  MESSAGE 'Test run only. No data deleted.' TYPE 'I'.
+ENDIF.
