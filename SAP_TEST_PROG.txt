@@ -3,15 +3,15 @@ REPORT zneptune_fmbb_test_ui.
 *-----------------------------------------------------------------------
 * Selection screen buttons
 *-----------------------------------------------------------------------
-SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-t01.
-SELECTION-SCREEN PUSHBUTTON /1(35) pb_submit USER-COMMAND SUBM.
-SELECTION-SCREEN PUSHBUTTON /1(35) pb_get    USER-COMMAND GETL.
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-t01.
+  SELECTION-SCREEN PUSHBUTTON /1(35) pbsubm USER-COMMAND subm.
+  SELECTION-SCREEN PUSHBUTTON /1(35) pbget    USER-COMMAND getl.
 SELECTION-SCREEN END OF BLOCK b1.
 
 INITIALIZATION.
   "Maintain these in SE38 -> Text Elements -> Text Symbols
-  pb_submit = text-b01. " e.g. 'Create Mock Data + SUBMIT'
-  pb_get    = text-b02. " e.g. 'Get Items Awaiting Approval'
+  pbsubm = TEXT-b01. " e.g. 'Create Mock Data + SUBMIT'
+  pbget    = TEXT-b02. " e.g. 'Get Items Awaiting Approval'
 
 AT SELECTION-SCREEN.
   CASE sy-ucomm.
@@ -30,35 +30,35 @@ START-OF-SELECTION.
 *-----------------------------------------------------------------------
 * Types for display tables
 *-----------------------------------------------------------------------
-TYPES: BEGIN OF ty_hdr_list,
-         sel    TYPE c LENGTH 1,          "for future checkbox selection
-         refid  TYPE zfmbb_hdr-refid,
-         status TYPE zfmbb_hdr-status,
-         erdat  TYPE zfmbb_hdr-erdat,
-         erzet  TYPE zfmbb_hdr-erzet,
-         ernam  TYPE zfmbb_hdr-ernam,
-         doctype TYPE bapi_0050_header-doctype,
-         docdate TYPE bapi_0050_header-docdate,
-         pstng_date TYPE bapi_0050_header-pstng_date,
-         fm_area TYPE bapi_0050_header-fm_area,
-       END OF ty_hdr_list.
+  TYPES: BEGIN OF ty_hdr_list,
+           sel        TYPE c LENGTH 1,          "for future checkbox selection
+           refid      TYPE zfmbb_hdr-refid,
+           status     TYPE zfmbb_hdr-status,
+           erdat      TYPE zfmbb_hdr-erdat,
+           erzet      TYPE zfmbb_hdr-erzet,
+           ernam      TYPE zfmbb_hdr-ernam,
+           doctype    TYPE bapi_0050_header-doctype,
+           docdate    TYPE bapi_0050_header-docdate,
+           pstng_date TYPE bapi_0050_header-pstng_date,
+           fm_area    TYPE bapi_0050_header-fm_area,
+         END OF ty_hdr_list.
 
-DATA gt_hdr_list TYPE STANDARD TABLE OF ty_hdr_list WITH DEFAULT KEY.
-DATA gt_return   TYPE STANDARD TABLE OF bapiret2 WITH DEFAULT KEY.
+  DATA gt_hdr_list TYPE STANDARD TABLE OF ty_hdr_list WITH DEFAULT KEY.
+  DATA gt_return   TYPE STANDARD TABLE OF bapiret2 WITH DEFAULT KEY.
 
 *-----------------------------------------------------------------------
 * FORMS
 *-----------------------------------------------------------------------
 FORM do_submit_mock.
 
-  DATA: ls_header      TYPE bapi_0050_header,
-        ls_header_add  TYPE bapi_0050_header_add,
-        lt_item        TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
-        lt_sender      TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
-        lt_period      TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
-        lt_sender_prd  TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
-        lt_longtext    TYPE STANDARD TABLE OF bapi_0050_longtext WITH DEFAULT KEY,
-        lt_extin       TYPE STANDARD TABLE OF bapiparex WITH DEFAULT KEY.
+  DATA: ls_header     TYPE bapi_0050_header,
+        ls_header_add TYPE bapi_0050_header_add,
+        lt_item       TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
+        lt_sender     TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
+        lt_period     TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
+        lt_sender_prd TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
+        lt_longtext   TYPE STANDARD TABLE OF bapi_0050_longtext WITH DEFAULT KEY,
+        lt_extin      TYPE STANDARD TABLE OF bapiparex WITH DEFAULT KEY.
 
   CLEAR gt_return.
 
@@ -92,7 +92,7 @@ FORM do_submit_mock.
       APPEND VALUE #( type = 'E' message = lx->get_text( ) ) TO gt_return.
   ENDTRY.
 
-  PERFORM display_return USING 'SUBMIT RESULT' gt_return[].
+  PERFORM display_return USING 'SUBMIT RESULT' CHANGING gt_return.
 
 ENDFORM.
 
@@ -113,7 +113,7 @@ FORM do_get_list.
       ).
     CATCH cx_root INTO DATA(lx).
       APPEND VALUE #( type = 'E' message = lx->get_text( ) ) TO gt_return.
-      PERFORM display_return USING 'GET LIST FAILED' gt_return[].
+      PERFORM display_return USING 'GET LIST FAILED' CHANGING gt_return.
       RETURN.
   ENDTRY.
 
@@ -134,7 +134,7 @@ FORM do_get_list.
 
   IF gt_hdr_list IS INITIAL.
     APPEND VALUE #( type = 'I' message = 'No SUBMITTED items found.' ) TO gt_return.
-    PERFORM display_return USING 'GET LIST' gt_return[].
+    PERFORM display_return USING 'GET LIST' CHANGING gt_return.
     RETURN.
   ENDIF.
 
@@ -147,9 +147,9 @@ FORM do_approve USING i_refid TYPE zfmbb_hdr-refid.
 
   CLEAR gt_return.
 
-  DATA: lv_fmarea   TYPE bapi_0050_fields-fm_area,
-        lv_docyear  TYPE bapi_0050_fields-doc_year,
-        lv_docnum   TYPE bapi_0050_fields-document.
+  DATA: lv_fmarea  TYPE bapi_0050_fields-fm_area,
+        lv_docyear TYPE bapi_0050_fields-doc_year,
+        lv_docnum  TYPE bapi_0050_fields-document.
 
   TRY.
       zcl_neptune_fmbb=>approve(
@@ -165,7 +165,9 @@ FORM do_approve USING i_refid TYPE zfmbb_hdr-refid.
       APPEND VALUE #( type = 'E' message = lx->get_text( ) ) TO gt_return.
   ENDTRY.
 
-  PERFORM display_return USING |APPROVE { i_refid }| gt_return[].
+  DATA:lv_title TYPE string.
+  CONCATENATE 'APPROVE' i_refid INTO lv_title SEPARATED BY space.
+  PERFORM display_return USING lv_title CHANGING gt_return.
 
 ENDFORM.
 
@@ -229,7 +231,8 @@ FORM build_fcat_hdr CHANGING ct_fcat TYPE lvc_t_fcat.
   DATA ls_fcat TYPE lvc_s_fcat.
   CLEAR ct_fcat.
 
-  DEFINE add.
+
+  DEFINE add_field.
     CLEAR ls_fcat.
     ls_fcat-fieldname = &1.
     ls_fcat-coltext   = &2.
@@ -237,15 +240,15 @@ FORM build_fcat_hdr CHANGING ct_fcat TYPE lvc_t_fcat.
     APPEND ls_fcat TO ct_fcat.
   END-OF-DEFINITION.
 
-  add 'REFID'      'Ref ID'        30.
-  add 'STATUS'     'Status'        10.
-  add 'ERDAT'      'Created On'    10.
-  add 'ERZET'      'Created At'     8.
-  add 'ERNAM'      'Created By'    12.
-  add 'DOCTYPE'    'DocType'        6.
-  add 'DOCDATE'    'Doc Date'      10.
-  add 'PSTNG_DATE' 'Posting Date'  10.
-  add 'FM_AREA'    'FM Area'        6.
+  add_field 'REFID'      'Ref ID'        30.
+  add_field 'STATUS'     'Status'        10.
+  add_field 'ERDAT'      'Created On'    10.
+  add_field 'ERZET'      'Created At'     8.
+  add_field 'ERNAM'      'Created By'    12.
+  add_field 'DOCTYPE'    'DocType'        6.
+  add_field 'DOCDATE'    'Doc Date'      10.
+  add_field 'PSTNG_DATE' 'Posting Date'  10.
+  add_field 'FM_AREA'    'FM Area'        6.
 
 ENDFORM.
 
@@ -271,7 +274,7 @@ ENDFORM.
 * Display: Return messages as ALV (BAPIRET2)
 *-----------------------------------------------------------------------
 FORM display_return USING i_title TYPE string
-                          it_ret  TYPE STANDARD TABLE.
+                 CHANGING ct_ret  TYPE STANDARD TABLE of bapiret2.
 
   DATA lt_fcat TYPE lvc_t_fcat.
 
@@ -279,8 +282,10 @@ FORM display_return USING i_title TYPE string
   WRITE: / i_title.
   ULINE.
 
+  FIELD-SYMBOLS <r> TYPE bapiret2.
+
   "Fallback simple list if ALV fails
-  LOOP AT it_ret ASSIGNING FIELD-SYMBOL(<r>).
+  LOOP AT ct_ret ASSIGNING <r>.
     WRITE: / <r>-type, <r>-id, <r>-number, <r>-message.
   ENDLOOP.
 
