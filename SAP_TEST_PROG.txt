@@ -1,97 +1,287 @@
-CLASS-METHODS get_for_approval
-  IMPORTING
-    i_status        TYPE char10 DEFAULT 'SUBMITTED'
-    i_with_items    TYPE abap_bool DEFAULT abap_true
-    i_with_sender   TYPE abap_bool DEFAULT abap_false
-    i_with_periods  TYPE abap_bool DEFAULT abap_false
-    i_with_text     TYPE abap_bool DEFAULT abap_false
-    i_with_extin    TYPE abap_bool DEFAULT abap_false
-  EXPORTING
-    et_hdr          TYPE ztt_zfmbb_hdr
-    et_item         TYPE ztt_zfmbb_item
-    et_sitem        TYPE ztt_zfmbb_sitem
-    et_prd          TYPE ztt_zfmbb_prd
-    et_sprd         TYPE ztt_zfmbb_sprd
-    et_ltxt         TYPE ztt_zfmbb_ltxt
-    et_extin        TYPE ztt_zfmbb_extin.
+REPORT zneptune_fmbb_test_ui.
 
+*-----------------------------------------------------------------------
+* Selection screen buttons
+*-----------------------------------------------------------------------
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-t01.
+SELECTION-SCREEN PUSHBUTTON /1(35) pb_submit USER-COMMAND SUBM.
+SELECTION-SCREEN PUSHBUTTON /1(35) pb_get    USER-COMMAND GETL.
+SELECTION-SCREEN END OF BLOCK b1.
 
-METHOD get_for_approval.
+INITIALIZATION.
+  "Maintain these in SE38 -> Text Elements -> Text Symbols
+  pb_submit = text-b01. " e.g. 'Create Mock Data + SUBMIT'
+  pb_get    = text-b02. " e.g. 'Get Items Awaiting Approval'
 
-  CLEAR: et_hdr, et_item, et_sitem, et_prd, et_sprd, et_ltxt, et_extin.
+AT SELECTION-SCREEN.
+  CASE sy-ucomm.
+    WHEN 'SUBM'.
+      PERFORM do_submit_mock.
+      sy-ucomm = 'ONLI'. "avoid re-trigger
+    WHEN 'GETL'.
+      PERFORM do_get_list.
+      sy-ucomm = 'ONLI'.
+  ENDCASE.
 
-  "1) Headers awaiting approval
-  SELECT *
-    FROM zfmbb_hdr
-    INTO TABLE @et_hdr
-   WHERE status = @i_status
-   ORDER BY erdat DESC, erzet DESC.
+START-OF-SELECTION.
+  "No-op: all actions are from buttons
+  WRITE: / 'Use the buttons above.'.
 
-  IF et_hdr IS INITIAL.
+*-----------------------------------------------------------------------
+* Types for display tables
+*-----------------------------------------------------------------------
+TYPES: BEGIN OF ty_hdr_list,
+         sel    TYPE c LENGTH 1,          "for future checkbox selection
+         refid  TYPE zfmbb_hdr-refid,
+         status TYPE zfmbb_hdr-status,
+         erdat  TYPE zfmbb_hdr-erdat,
+         erzet  TYPE zfmbb_hdr-erzet,
+         ernam  TYPE zfmbb_hdr-ernam,
+         doctype TYPE bapi_0050_header-doctype,
+         docdate TYPE bapi_0050_header-docdate,
+         pstng_date TYPE bapi_0050_header-pstng_date,
+         fm_area TYPE bapi_0050_header-fm_area,
+       END OF ty_hdr_list.
+
+DATA gt_hdr_list TYPE STANDARD TABLE OF ty_hdr_list WITH DEFAULT KEY.
+DATA gt_return   TYPE STANDARD TABLE OF bapiret2 WITH DEFAULT KEY.
+
+*-----------------------------------------------------------------------
+* FORMS
+*-----------------------------------------------------------------------
+FORM do_submit_mock.
+
+  DATA: ls_header      TYPE bapi_0050_header,
+        ls_header_add  TYPE bapi_0050_header_add,
+        lt_item        TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
+        lt_sender      TYPE STANDARD TABLE OF bapi_0050_item WITH DEFAULT KEY,
+        lt_period      TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
+        lt_sender_prd  TYPE STANDARD TABLE OF bapi_0050_period WITH DEFAULT KEY,
+        lt_longtext    TYPE STANDARD TABLE OF bapi_0050_longtext WITH DEFAULT KEY,
+        lt_extin       TYPE STANDARD TABLE OF bapiparex WITH DEFAULT KEY.
+
+  CLEAR gt_return.
+
+  "------------------------------------------------------------
+  " Build mock payload here (you already have this working)
+  "------------------------------------------------------------
+  PERFORM build_mock_payload
+    CHANGING ls_header ls_header_add
+             lt_item lt_sender
+             lt_period lt_sender_prd
+             lt_longtext lt_extin.
+
+  "------------------------------------------------------------
+  " Call your class SUBMIT method (stages into Z tables)
+  "------------------------------------------------------------
+  TRY.
+      zcl_neptune_fmbb=>submit(
+        EXPORTING
+          i_header        = ls_header
+          i_header_add    = ls_header_add
+          it_item         = lt_item
+          it_sender       = lt_sender
+          it_period       = lt_period
+          it_sender_prd   = lt_sender_prd
+          it_longtext     = lt_longtext
+          it_extin        = lt_extin
+        IMPORTING
+          et_return       = gt_return
+      ).
+    CATCH cx_root INTO DATA(lx).
+      APPEND VALUE #( type = 'E' message = lx->get_text( ) ) TO gt_return.
+  ENDTRY.
+
+  PERFORM display_return USING 'SUBMIT RESULT' gt_return[].
+
+ENDFORM.
+
+FORM do_get_list.
+
+  CLEAR: gt_hdr_list, gt_return.
+
+  DATA lt_hdr TYPE ztt_zfmbb_hdr. "SE11 table type you created
+
+  TRY.
+      "Get headers awaiting approval (SUBMITTED)
+      zcl_neptune_fmbb=>get_for_approval(
+        EXPORTING
+          i_status     = 'SUBMITTED'
+          i_with_items = abap_false
+        IMPORTING
+          et_hdr       = lt_hdr
+      ).
+    CATCH cx_root INTO DATA(lx).
+      APPEND VALUE #( type = 'E' message = lx->get_text( ) ) TO gt_return.
+      PERFORM display_return USING 'GET LIST FAILED' gt_return[].
+      RETURN.
+  ENDTRY.
+
+  "Project to lightweight list structure (avoid huge include display)
+  LOOP AT lt_hdr ASSIGNING FIELD-SYMBOL(<h>).
+    APPEND VALUE ty_hdr_list(
+      refid      = <h>-refid
+      status     = <h>-status
+      erdat      = <h>-erdat
+      erzet      = <h>-erzet
+      ernam      = <h>-ernam
+      doctype    = <h>-doctype
+      docdate    = <h>-docdate
+      pstng_date = <h>-pstng_date
+      fm_area    = <h>-fm_area
+    ) TO gt_hdr_list.
+  ENDLOOP.
+
+  IF gt_hdr_list IS INITIAL.
+    APPEND VALUE #( type = 'I' message = 'No SUBMITTED items found.' ) TO gt_return.
+    PERFORM display_return USING 'GET LIST' gt_return[].
     RETURN.
   ENDIF.
 
-  "2) Optional child fetches (only when requested)
-  IF i_with_items = abap_true.
-    SELECT *
-      FROM zfmbb_item
-      INTO TABLE @et_item
-      FOR ALL ENTRIES IN @et_hdr
-     WHERE refid = @et_hdr-refid
-     ORDER BY refid, seqno.
-  ENDIF.
+  "Show ALV list. Double-click a row to APPROVE.
+  PERFORM display_hdr_list.
 
-  IF i_with_sender = abap_true.
-    SELECT *
-      FROM zfmbb_sitem
-      INTO TABLE @et_sitem
-      FOR ALL ENTRIES IN @et_hdr
-     WHERE refid = @et_hdr-refid
-     ORDER BY refid, seqno.
-  ENDIF.
+ENDFORM.
 
-  IF i_with_periods = abap_true.
-    SELECT *
-      FROM zfmbb_prd
-      INTO TABLE @et_prd
-      FOR ALL ENTRIES IN @et_hdr
-     WHERE refid = @et_hdr-refid
-     ORDER BY refid, seqno.
+FORM do_approve USING i_refid TYPE zfmbb_hdr-refid.
 
-    SELECT *
-      FROM zfmbb_sprd
-      INTO TABLE @et_sprd
-      FOR ALL ENTRIES IN @et_hdr
-     WHERE refid = @et_hdr-refid
-     ORDER BY refid, seqno.
-  ENDIF.
+  CLEAR gt_return.
 
-  IF i_with_text = abap_true.
-    SELECT *
-      FROM zfmbb_ltxt
-      INTO TABLE @et_ltxt
-      FOR ALL ENTRIES IN @et_hdr
-     WHERE refid = @et_hdr-refid
-     ORDER BY refid, seqno.
-  ENDIF.
+  DATA: lv_fmarea   TYPE bapi_0050_fields-fm_area,
+        lv_docyear  TYPE bapi_0050_fields-doc_year,
+        lv_docnum   TYPE bapi_0050_fields-document.
 
-  IF i_with_extin = abap_true.
-    SELECT *
-      FROM zfmbb_extin
-      INTO TABLE @et_extin
-      FOR ALL ENTRIES IN @et_hdr
-     WHERE refid = @et_hdr-refid
-     ORDER BY refid, seqno.
-  ENDIF.
+  TRY.
+      zcl_neptune_fmbb=>approve(
+        EXPORTING
+          i_refid    = i_refid
+        IMPORTING
+          e_fmarea   = lv_fmarea
+          e_docyear  = lv_docyear
+          e_docnum   = lv_docnum
+          et_return  = gt_return
+      ).
+    CATCH cx_root INTO DATA(lx).
+      APPEND VALUE #( type = 'E' message = lx->get_text( ) ) TO gt_return.
+  ENDTRY.
 
-ENDMETHOD.
+  PERFORM display_return USING |APPROVE { i_refid }| gt_return[].
 
+ENDFORM.
 
+*-----------------------------------------------------------------------
+* Build mock payload (stub - replace with your working mock build)
+*-----------------------------------------------------------------------
+FORM build_mock_payload
+  CHANGING
+    cs_header      TYPE bapi_0050_header
+    cs_header_add  TYPE bapi_0050_header_add
+    ct_item        TYPE STANDARD TABLE
+    ct_sender      TYPE STANDARD TABLE
+    ct_period      TYPE STANDARD TABLE
+    ct_sender_prd  TYPE STANDARD TABLE
+    ct_longtext    TYPE STANDARD TABLE
+    ct_extin       TYPE STANDARD TABLE.
 
-zcl_neptune_fmbb=>get_for_approval(
-  EXPORTING
-    i_status     = 'SUBMITTED'
-    i_with_items = abap_false
-  IMPORTING
-    et_hdr       = lt_hdr
-).
+  "IMPORTANT: This is just a placeholder. Paste your working mock logic here.
+  CLEAR: cs_header, cs_header_add.
+  REFRESH: ct_item, ct_sender, ct_period, ct_sender_prd, ct_longtext, ct_extin.
+
+  "Example minimal fields (you’ll replace with your real working mock):
+  cs_header-fm_area    = 'N100'.
+  cs_header-doctype    = 'APPR'.
+  cs_header-docdate    = sy-datum.
+  cs_header-pstng_date = sy-datum.
+
+  "etc...
+ENDFORM.
+
+*-----------------------------------------------------------------------
+* Display: Headers list ALV (double-click approves)
+*-----------------------------------------------------------------------
+FORM display_hdr_list.
+
+  DATA: lt_fcat TYPE lvc_t_fcat,
+        ls_layo TYPE lvc_s_layo.
+
+  ls_layo-zebra = abap_true.
+
+  PERFORM build_fcat_hdr CHANGING lt_fcat.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY_LVC'
+    EXPORTING
+      i_callback_program       = sy-repid
+      i_callback_user_command  = 'ALV_UCOMM'
+      i_callback_pf_status_set = ''
+      is_layout_lvc            = ls_layo
+      it_fieldcat_lvc          = lt_fcat
+      i_save                   = 'A'
+    TABLES
+      t_outtab                 = gt_hdr_list
+    EXCEPTIONS
+      program_error            = 1
+      OTHERS                   = 2.
+
+ENDFORM.
+
+FORM build_fcat_hdr CHANGING ct_fcat TYPE lvc_t_fcat.
+
+  DATA ls_fcat TYPE lvc_s_fcat.
+  CLEAR ct_fcat.
+
+  DEFINE add.
+    CLEAR ls_fcat.
+    ls_fcat-fieldname = &1.
+    ls_fcat-coltext   = &2.
+    ls_fcat-outputlen = &3.
+    APPEND ls_fcat TO ct_fcat.
+  END-OF-DEFINITION.
+
+  add 'REFID'      'Ref ID'        30.
+  add 'STATUS'     'Status'        10.
+  add 'ERDAT'      'Created On'    10.
+  add 'ERZET'      'Created At'     8.
+  add 'ERNAM'      'Created By'    12.
+  add 'DOCTYPE'    'DocType'        6.
+  add 'DOCDATE'    'Doc Date'      10.
+  add 'PSTNG_DATE' 'Posting Date'  10.
+  add 'FM_AREA'    'FM Area'        6.
+
+ENDFORM.
+
+*-----------------------------------------------------------------------
+* ALV user command: approve on double click
+*-----------------------------------------------------------------------
+FORM alv_ucomm USING r_ucomm     LIKE sy-ucomm
+                     rs_selfield TYPE slis_selfield.
+
+  CASE r_ucomm.
+    WHEN '&IC1'. "double-click
+      READ TABLE gt_hdr_list INDEX rs_selfield-tabindex INTO DATA(ls_row).
+      IF sy-subrc = 0 AND ls_row-refid IS NOT INITIAL.
+        PERFORM do_approve USING ls_row-refid.
+      ENDIF.
+  ENDCASE.
+
+  rs_selfield-refresh = abap_true.
+
+ENDFORM.
+
+*-----------------------------------------------------------------------
+* Display: Return messages as ALV (BAPIRET2)
+*-----------------------------------------------------------------------
+FORM display_return USING i_title TYPE string
+                          it_ret  TYPE STANDARD TABLE.
+
+  DATA lt_fcat TYPE lvc_t_fcat.
+
+  WRITE: /.
+  WRITE: / i_title.
+  ULINE.
+
+  "Fallback simple list if ALV fails
+  LOOP AT it_ret ASSIGNING FIELD-SYMBOL(<r>).
+    WRITE: / <r>-type, <r>-id, <r>-number, <r>-message.
+  ENDLOOP.
+
+ENDFORM.
