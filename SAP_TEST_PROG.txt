@@ -1,32 +1,21 @@
-DATA: lt_item       TYPE tt_bapi_0050_item,
-      lt_sender     TYPE tt_bapi_0050_item,
-      lt_period     TYPE tt_bapi_0050_period,
-      lt_sender_prd TYPE tt_bapi_0050_period,
-      lt_longtext   TYPE tt_bapi_0050_longtext,
-      lt_extin      TYPE tt_bapiparex.
+DATA: lv_periv TYPE t001-periv,
+      lv_monat TYPE monat,
+      lv_gjahr TYPE gjahr.
 
-lt_item       = it_item.
-lt_sender     = it_sender.
-lt_period     = it_period.
-lt_sender_prd = it_sender_prd.
-lt_longtext   = it_longtext.
-lt_extin      = it_extin.
+" 1) Get fiscal year variant for your company code
+SELECT SINGLE periv
+  INTO lv_periv
+  FROM t001
+ WHERE bukrs = '<your_bukrs>'.
 
-CALL FUNCTION 'BAPI_0050_CREATE'
+" 2) Derive fiscal period from posting date
+CALL FUNCTION 'DATE_TO_PERIOD_CONVERT'
   EXPORTING
-    header_data        = i_header
-    header_data_add    = i_header_add
-    testrun            = lv_testrun
-    update_mode        = '1'
+    i_date  = gs_header-pstng_date
+    i_periv = lv_periv
   IMPORTING
-    fmarea             = e_fmarea
-    documentyear       = e_docyear
-    documentnumber     = e_docnum
-  TABLES
-    item_data          = lt_item
-    sender_item_data   = lt_sender
-    period_data        = lt_period
-    sender_period_data = lt_sender_prd
-    long_text          = lt_longtext
-    extensionin        = lt_extin
-    return             = et_return.
+    e_buper = lv_monat
+    e_gjahr = lv_gjahr.
+
+" 3) Use that as the budgeting period (NUMC3)
+ls_period-budgeting_period = |{ lv_monat ALPHA = IN WIDTH = 3 }|.
