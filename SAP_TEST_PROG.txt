@@ -1,35 +1,111 @@
+METHODS read_document
+  IMPORTING
+    !i_docyear TYPE bapi_0050_fields-doc_year
+    !i_docnum  TYPE bapi_0050_fields-document
+    !i_fmarea  TYPE bapi_0050_fields-fm_area.
 
-PARAMETERS p_test TYPE abap_bool DEFAULT abap_true.
 
-DATA lv_cnt TYPE i.
+METHOD read_document.
 
-FORM delete_table USING iv_tabname TYPE string.
-  IF p_test = abap_true.
-    SELECT COUNT(*) INTO lv_cnt FROM (iv_tabname).
-    WRITE: / iv_tabname, ': would delete', lv_cnt, 'records'.
-  ELSE.
-    DELETE FROM (iv_tabname).
-    lv_cnt = sy-dbcnt.
-    WRITE: / iv_tabname, ': deleted', lv_cnt, 'records'.
+  CLEAR:
+    gv_fmarea,
+    gv_docyear,
+    gv_docnum,
+    gs_header,
+    gt_item,
+    gt_sender,
+    gt_period,
+    gt_sender_prd,
+    gt_longtext,
+    gt_extin,
+    gt_return.
+
+  gv_fmarea  = i_fmarea.
+  gv_docyear = i_docyear.
+  gv_docnum  = i_docnum.
+
+  "------------------------------------------------------------
+  " Header
+  "------------------------------------------------------------
+  SELECT SINGLE *
+    FROM fmbdp
+    INTO @DATA(ls_fmbdp)
+   WHERE fm_area  = @i_fmarea
+     AND docyear  = @i_docyear
+     AND document = @i_docnum.
+
+  IF sy-subrc <> 0.
+    gt_return = VALUE #(
+      ( type = 'E'
+        id   = 'ZFMBB'
+        number = '010'
+        message = |FMBB document { i_docnum }/{ i_docyear } not found| )
+    ).
+    RETURN.
   ENDIF.
-ENDFORM.
 
-START-OF-SELECTION.
+  " Map header
+  gs_header-fm_area     = ls_fmbdp-fm_area.
+  gs_header-docdate     = ls_fmbdp-docdate.
+  gs_header-pstng_date  = ls_fmbdp-pstng_date.
+  gs_header-doctype     = ls_fmbdp-doctype.
 
-WRITE: / 'FMBB Staging Table Cleanup'.
-ULINE.
+  "------------------------------------------------------------
+  " Items
+  "------------------------------------------------------------
+  SELECT *
+    FROM fmblp
+    INTO TABLE @DATA(lt_fmblp)
+   WHERE fm_area  = @i_fmarea
+     AND docyear  = @i_docyear
+     AND document = @i_docnum.
 
-PERFORM delete_table USING 'ZFMBB_EXTIN'.
-PERFORM delete_table USING 'ZFMBB_LTXT'.
-PERFORM delete_table USING 'ZFMBB_SPRD'.
-PERFORM delete_table USING 'ZFMBB_PRD'.
-PERFORM delete_table USING 'ZFMBB_SITEM'.
-PERFORM delete_table USING 'ZFMBB_ITEM'.
-PERFORM delete_table USING 'ZFMBB_HDR'.
+  gt_item = CORRESPONDING #( lt_fmblp ).
 
-IF p_test = abap_false.
-  COMMIT WORK.
-  MESSAGE 'FMBB staging tables cleaned successfully.' TYPE 'S'.
-ELSE.
-  MESSAGE 'Test run only. No data deleted.' TYPE 'I'.
-ENDIF.
+  "------------------------------------------------------------
+  " Periods
+  "------------------------------------------------------------
+  SELECT *
+    FROM fmbpp
+    INTO TABLE @DATA(lt_fmbpp)
+   WHERE fm_area  = @i_fmarea
+     AND docyear  = @i_docyear
+     AND document = @i_docnum.
+
+  gt_period = CORRESPONDING #( lt_fmbpp ).
+
+  "------------------------------------------------------------
+  " Sender Items
+  "------------------------------------------------------------
+  SELECT *
+    FROM fmbsl
+    INTO TABLE @DATA(lt_fmbsl)
+   WHERE fm_area  = @i_fmarea
+     AND docyear  = @i_docyear
+     AND document = @i_docnum.
+
+  gt_sender = CORRESPONDING #( lt_fmbsl ).
+
+  "------------------------------------------------------------
+  " Sender Periods
+  "------------------------------------------------------------
+  SELECT *
+    FROM fmbslp
+    INTO TABLE @DATA(lt_fmbslp)
+   WHERE fm_area  = @i_fmarea
+     AND docyear  = @i_docyear
+     AND document = @i_docnum.
+
+  gt_sender_prd = CORRESPONDING #( lt_fmbslp ).
+
+  "------------------------------------------------------------
+  " Success message
+  "------------------------------------------------------------
+  APPEND VALUE bapiret2(
+    type    = 'S'
+    id      = 'ZFMBB'
+    number  = '000'
+    message = |FMBB document { i_docnum }/{ i_docyear } loaded successfully|
+  ) TO gt_return.
+
+ENDMETHOD.
