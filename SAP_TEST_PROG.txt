@@ -1,111 +1,62 @@
-METHODS read_document
+METHODS read_doc_detail
   IMPORTING
-    !i_docyear TYPE bapi_0050_fields-doc_year
-    !i_docnum  TYPE bapi_0050_fields-document
-    !i_fmarea  TYPE bapi_0050_fields-fm_area.
+    i_fm_area     TYPE bapi_0050_fields-fm_area
+    i_docyear     TYPE bapi_0050_fields-doc_year
+    i_docnumber   TYPE bapi_0050_fields-document
+    i_get_item    TYPE abap_bool DEFAULT abap_true
+    i_get_period  TYPE abap_bool DEFAULT abap_true
+    i_get_longtxt TYPE abap_bool DEFAULT abap_true
+    i_language    TYPE bapi_0050_fields-language OPTIONAL.
 
 
-METHOD read_document.
+METHOD read_doc_detail.
 
-  CLEAR:
-    gv_fmarea,
-    gv_docyear,
-    gv_docnum,
-    gs_header,
-    gt_item,
-    gt_sender,
-    gt_period,
-    gt_sender_prd,
-    gt_longtext,
-    gt_extin,
-    gt_return.
+  "Assumed method signature:
+  "  IMPORTING
+  "    i_fm_area     TYPE bapi_0050_fields-fm_area
+  "    i_docyear     TYPE bapi_0050_fields-doc_year
+  "    i_docnumber   TYPE bapi_0050_fields-document
+  "    i_get_item    TYPE abap_bool DEFAULT abap_true
+  "    i_get_period  TYPE abap_bool DEFAULT abap_true
+  "    i_get_longtxt TYPE abap_bool DEFAULT abap_true
+  "    i_language    TYPE bapi_0050_fields-language OPTIONAL
 
-  gv_fmarea  = i_fmarea.
-  gv_docyear = i_docyear.
-  gv_docnum  = i_docnum.
+  DATA lt_return TYPE STANDARD TABLE OF bapiret2.
 
-  "------------------------------------------------------------
-  " Header
-  "------------------------------------------------------------
-  SELECT SINGLE *
-    FROM fmbdp
-    INTO @DATA(ls_fmbdp)
-   WHERE fm_area  = @i_fmarea
-     AND docyear  = @i_docyear
-     AND document = @i_docnum.
+  CLEAR: gs_header,
+         gs_header_add,
+         gt_item,
+         gt_sender,
+         gt_period,
+         gt_sender_prd,
+         gt_longtext,
+         gt_extin,
+         lt_return.
 
-  IF sy-subrc <> 0.
-    gt_return = VALUE #(
-      ( type = 'E'
-        id   = 'ZFMBB'
-        number = '010'
-        message = |FMBB document { i_docnum }/{ i_docyear } not found| )
-    ).
-    RETURN.
-  ENDIF.
+  CALL FUNCTION 'BAPI_0050_GET_DETAIL'
+    EXPORTING
+      fmarea           = i_fm_area
+      documentyear     = i_docyear
+      documentnumber   = i_docnumber
+      get_item         = COND #( WHEN i_get_item    = abap_true THEN 'X' ELSE space )
+      get_period       = COND #( WHEN i_get_period  = abap_true THEN 'X' ELSE space )
+      get_long_text    = COND #( WHEN i_get_longtxt = abap_true THEN 'X' ELSE space )
+      language         = COND #( WHEN i_language IS INITIAL THEN sy-langu ELSE i_language )
+    IMPORTING
+      header_data      = gs_header
+      header_data_add  = gs_header_add
+    TABLES
+      item_data            = gt_item
+      sender_item_data     = gt_sender
+      period_data          = gt_period
+      sender_period_data   = gt_sender_prd
+      long_text            = gt_longtext
+      extension_in         = gt_extin
+      return               = lt_return.
 
-  " Map header
-  gs_header-fm_area     = ls_fmbdp-fm_area.
-  gs_header-docdate     = ls_fmbdp-docdate.
-  gs_header-pstng_date  = ls_fmbdp-pstng_date.
-  gs_header-doctype     = ls_fmbdp-doctype.
-
-  "------------------------------------------------------------
-  " Items
-  "------------------------------------------------------------
-  SELECT *
-    FROM fmblp
-    INTO TABLE @DATA(lt_fmblp)
-   WHERE fm_area  = @i_fmarea
-     AND docyear  = @i_docyear
-     AND document = @i_docnum.
-
-  gt_item = CORRESPONDING #( lt_fmblp ).
-
-  "------------------------------------------------------------
-  " Periods
-  "------------------------------------------------------------
-  SELECT *
-    FROM fmbpp
-    INTO TABLE @DATA(lt_fmbpp)
-   WHERE fm_area  = @i_fmarea
-     AND docyear  = @i_docyear
-     AND document = @i_docnum.
-
-  gt_period = CORRESPONDING #( lt_fmbpp ).
-
-  "------------------------------------------------------------
-  " Sender Items
-  "------------------------------------------------------------
-  SELECT *
-    FROM fmbsl
-    INTO TABLE @DATA(lt_fmbsl)
-   WHERE fm_area  = @i_fmarea
-     AND docyear  = @i_docyear
-     AND document = @i_docnum.
-
-  gt_sender = CORRESPONDING #( lt_fmbsl ).
-
-  "------------------------------------------------------------
-  " Sender Periods
-  "------------------------------------------------------------
-  SELECT *
-    FROM fmbslp
-    INTO TABLE @DATA(lt_fmbslp)
-   WHERE fm_area  = @i_fmarea
-     AND docyear  = @i_docyear
-     AND document = @i_docnum.
-
-  gt_sender_prd = CORRESPONDING #( lt_fmbslp ).
-
-  "------------------------------------------------------------
-  " Success message
-  "------------------------------------------------------------
-  APPEND VALUE bapiret2(
-    type    = 'S'
-    id      = 'ZFMBB'
-    number  = '000'
-    message = |FMBB document { i_docnum }/{ i_docyear } loaded successfully|
-  ) TO gt_return.
+  "Optional: raise/handle if hard error
+  "IF has_hard_error( lt_return ) = abap_true.
+  "  "your handling here (e.g., store lt_return somewhere or raise exception)
+  "ENDIF.
 
 ENDMETHOD.
