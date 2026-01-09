@@ -1,62 +1,56 @@
-METHODS read_doc_detail
-  IMPORTING
-    i_fm_area     TYPE bapi_0050_fields-fm_area
-    i_docyear     TYPE bapi_0050_fields-doc_year
-    i_docnumber   TYPE bapi_0050_fields-document
-    i_get_item    TYPE abap_bool DEFAULT abap_true
-    i_get_period  TYPE abap_bool DEFAULT abap_true
-    i_get_longtxt TYPE abap_bool DEFAULT abap_true
-    i_language    TYPE bapi_0050_fields-language OPTIONAL.
+function CheckRequired(form) {
+  var aState = [];
+  var state = "S";
 
+  function validateControl(oCtrl) {
+    if (!oCtrl) { return; }
 
-METHOD read_doc_detail.
+    // If it's an HBox, validate all its items (and support nested HBox scenarios)
+    if (oCtrl.isA && oCtrl.isA("sap.m.HBox")) {
+      var aItems = oCtrl.getItems ? oCtrl.getItems() : [];
+      $.each(aItems, function (i, oItem) {
+        validateControl(oItem);
+      });
+      return;
+    }
 
-  "Assumed method signature:
-  "  IMPORTING
-  "    i_fm_area     TYPE bapi_0050_fields-fm_area
-  "    i_docyear     TYPE bapi_0050_fields-doc_year
-  "    i_docnumber   TYPE bapi_0050_fields-document
-  "    i_get_item    TYPE abap_bool DEFAULT abap_true
-  "    i_get_period  TYPE abap_bool DEFAULT abap_true
-  "    i_get_longtxt TYPE abap_bool DEFAULT abap_true
-  "    i_language    TYPE bapi_0050_fields-language OPTIONAL
+    // Only validate required + visible controls
+    if (!(oCtrl.getRequired && oCtrl.getRequired() === true)) { return; }
+    if (!(oCtrl.isVisible && oCtrl.isVisible() === true)) { return; }
 
-  DATA lt_return TYPE STANDARD TABLE OF bapiret2.
+    var sClassName = oCtrl.getMetadata && oCtrl.getMetadata().getName
+      ? oCtrl.getMetadata().getName()
+      : "";
 
-  CLEAR: gs_header,
-         gs_header_add,
-         gt_item,
-         gt_sender,
-         gt_period,
-         gt_sender_prd,
-         gt_longtext,
-         gt_extin,
-         lt_return.
+    // Restrict to the controls you care about
+    var bSupported =
+      sClassName === "sap.m.Select" ||
+      sClassName === "sap.m.Input" ||
+      sClassName === "sap.m.ComboBox" ||
+      sClassName === "sap.m.DatePicker";
 
-  CALL FUNCTION 'BAPI_0050_GET_DETAIL'
-    EXPORTING
-      fmarea           = i_fm_area
-      documentyear     = i_docyear
-      documentnumber   = i_docnumber
-      get_item         = COND #( WHEN i_get_item    = abap_true THEN 'X' ELSE space )
-      get_period       = COND #( WHEN i_get_period  = abap_true THEN 'X' ELSE space )
-      get_long_text    = COND #( WHEN i_get_longtxt = abap_true THEN 'X' ELSE space )
-      language         = COND #( WHEN i_language IS INITIAL THEN sy-langu ELSE i_language )
-    IMPORTING
-      header_data      = gs_header
-      header_data_add  = gs_header_add
-    TABLES
-      item_data            = gt_item
-      sender_item_data     = gt_sender
-      period_data          = gt_period
-      sender_period_data   = gt_sender_prd
-      long_text            = gt_longtext
-      extension_in         = gt_extin
-      return               = lt_return.
+    if (!bSupported) { return; }
 
-  "Optional: raise/handle if hard error
-  "IF has_hard_error( lt_return ) = abap_true.
-  "  "your handling here (e.g., store lt_return somewhere or raise exception)
-  "ENDIF.
+    var sResult;
+    if (sClassName === "sap.m.Select" || sClassName === "sap.m.ComboBox") {
+      sResult = validateInput(oCtrl.getSelectedKey(), oCtrl);
+    } else {
+      sResult = validateInput(oCtrl.getValue(), oCtrl);
+    }
 
-ENDMETHOD.
+    aState.push(sResult === "E" ? "E" : "S");
+  }
+
+  // Validate all top-level form content controls
+  var aContent = form.getContent ? form.getContent() : [];
+  $.each(aContent, function (i, oCtrl) {
+    validateControl(oCtrl);
+  });
+
+  // If any validation returned "E", overall state is "E"
+  if ($.inArray("E", aState) !== -1) {
+    state = "E";
+  }
+
+  return state;
+}
