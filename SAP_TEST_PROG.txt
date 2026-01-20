@@ -1,56 +1,6 @@
-function CheckRequired(form) {
-  var aState = [];
-  var state = "S";
+    if (typeof config.iconDisplayShape !== 'string') {
+        iconDisplayShape = sap.m.AvatarShape.Square;
 
-  function validateControl(oCtrl) {
-    if (!oCtrl) { return; }
-
-    // If it's an HBox, validate all its items (and support nested HBox scenarios)
-    if (oCtrl.isA && oCtrl.isA("sap.m.HBox")) {
-      var aItems = oCtrl.getItems ? oCtrl.getItems() : [];
-      $.each(aItems, function (i, oItem) {
-        validateControl(oItem);
-      });
-      return;
+    } else if (config.iconDisplayShape === sap.m.AvatarShape.Circle) {
+        iconDisplayShape = sap.m.AvatarShape.Circle;
     }
-
-    // Only validate required + visible controls
-    if (!(oCtrl.getRequired && oCtrl.getRequired() === true)) { return; }
-    if (!(oCtrl.isVisible && oCtrl.isVisible() === true)) { return; }
-
-    var sClassName = oCtrl.getMetadata && oCtrl.getMetadata().getName
-      ? oCtrl.getMetadata().getName()
-      : "";
-
-    // Restrict to the controls you care about
-    var bSupported =
-      sClassName === "sap.m.Select" ||
-      sClassName === "sap.m.Input" ||
-      sClassName === "sap.m.ComboBox" ||
-      sClassName === "sap.m.DatePicker";
-
-    if (!bSupported) { return; }
-
-    var sResult;
-    if (sClassName === "sap.m.Select" || sClassName === "sap.m.ComboBox") {
-      sResult = validateInput(oCtrl.getSelectedKey(), oCtrl);
-    } else {
-      sResult = validateInput(oCtrl.getValue(), oCtrl);
-    }
-
-    aState.push(sResult === "E" ? "E" : "S");
-  }
-
-  // Validate all top-level form content controls
-  var aContent = form.getContent ? form.getContent() : [];
-  $.each(aContent, function (i, oCtrl) {
-    validateControl(oCtrl);
-  });
-
-  // If any validation returned "E", overall state is "E"
-  if ($.inArray("E", aState) !== -1) {
-    state = "E";
-  }
-
-  return state;
-}
